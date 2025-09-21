@@ -35,7 +35,24 @@ python -m pip install -e .
 
 > The commands executed by the CLI shell out to the AWS CLI for recursive S3
 > copy operations.  Ensure that the AWS CLI is installed and authenticated in
-the environment where you run these commands.
+> the environment where you run these commands.
+
+### Optional Conda environment
+
+For contributors who prefer managing dependencies with Conda, this repository
+ships an `environment.yml` file describing a minimal environment that matches
+the package requirements.
+
+```bash
+conda env create -f environment.yml
+conda activate daylily-omics-references
+python -m pip install -e .
+```
+
+When `daylily-omics-references` is executed as part of
+[`daylily-ephemeral-cluster`](https://github.com/Daylily-Informatics/daylily-ephemeral-cluster)
+the Conda environment is provisioned automatically and installed into the
+`DAY-EC` Conda environment on the cluster nodes.
 
 ## Usage
 

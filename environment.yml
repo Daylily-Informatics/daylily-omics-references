@@ -1,0 +1,8 @@
+name: daylily-omics-references
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.9
+  - pip
+  - boto3>=1.34
