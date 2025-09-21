@@ -12,6 +12,12 @@ implemented in `bin/create_daylily_omics_analysis_s3.sh` and the reference
 validation that happened inside `bin/daylily-create-ephemeral-cluster`.
 
 ## Installation
+Clone the tagged version of the repo you are looking for.
+
+```bash
+git clone
+
+```
 
 The package targets Python 3.9 or newer.  Install it directly from the source
 checkout:
