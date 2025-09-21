@@ -15,7 +15,8 @@ validation that happened inside `bin/daylily-create-ephemeral-cluster`.
 Clone the tagged version of the repo you are looking for.
 
 ```bash
-git clone
+git clone https://github.com/Daylily-Informatics/daylily-omics-references.git
+cd daylily-omics-references
 
 ```
 
