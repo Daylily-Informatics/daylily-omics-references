@@ -15,7 +15,7 @@ SUPPORTED_REFERENCE_VERSIONS = tuple(SOURCE_BUCKET_BY_VERSION.keys())
 CORE_PREFIXES = (
     "cluster_boot_config/",
     "data/cached_envs/",
-    "data/",
+    "data/libs/",
     "data/tool_specific_resources/",
     "data/budget_tags/",
 )

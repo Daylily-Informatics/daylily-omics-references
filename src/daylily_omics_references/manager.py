@@ -325,7 +325,7 @@ class ReferenceBucketManager:
             raise ValueError(f"Unsupported reference version: {expected_version}")
 
         if not self.bucket_exists(bucket):
-            raise BucketVerificationError(bucket, ["bucket does not exist"])
+            raise BucketVerificationError(bucket, [f"bucket ({bucket}) does not exist"])
 
         issues: List[str] = []
         bucket_version = self.read_bucket_version(bucket)
