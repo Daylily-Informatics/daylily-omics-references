@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "daylily-omics-references"
-version = "0.1.12"
+version = "0.1.13"
 description = "Tools for creating and validating Daylily omics analysis reference buckets"
 readme = "README.md"
 authors = [{name = "Daylily Informatics"}]
@@ -12,10 +12,13 @@ license = {file = "LICENSE"}
 requires-python = "~=3.11"
 # ⚠️ remove boto3 from hard deps
 dependencies = [
-  "aws-parallelcluster[cli]==3.13.2",
 ]
 
 [project.optional-dependencies]
+aws = [
+  # keep this range broad; pcluster will supply compatible versions already in the env
+  "boto3>=1.28,<2.0",
+]
 
 [project.scripts]
 daylily-omics-references = "daylily_omics_references.cli:main"
