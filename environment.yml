@@ -3,6 +3,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python>=3.9
+  - python>=3.11
   - pip
-  - boto3>=1.34
+    - aws-parallelcluster[cli]==3.13.2
+
