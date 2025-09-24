@@ -6,5 +6,5 @@ dependencies:
   - python=3.11
   - setuptools<81
   - pip
-    - aws-parallelcluster[cli]==3.13.1
+    - aws-parallelcluster[cli]==3.13.2
 
