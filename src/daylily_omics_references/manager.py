@@ -69,12 +69,42 @@ class ReferenceBucketManager:
     # ------------------------------------------------------------------
     # Bucket helpers
     # ------------------------------------------------------------------
+    def _maybe_redirect_s3_client(self, bucket: str, error: ClientError) -> bool:
+        """Recreate the S3 client if *error* indicates a regional redirect."""
+
+        metadata = error.response.get("ResponseMetadata", {}) if hasattr(error, "response") else {}
+        headers = metadata.get("HTTPHeaders", {})
+        bucket_region = headers.get("x-amz-bucket-region")
+
+        current_region = getattr(self.s3_client.meta, "region_name", None)
+        if not bucket_region or bucket_region == current_region:
+            return False
+
+        self.logger.debug(
+            "Received redirect for bucket %s to region %s (was %s)",
+            bucket,
+            bucket_region,
+            current_region,
+        )
+
+        # Recreate the client bound to the bucket's actual region.
+        self.s3_client = self.session.client("s3", region_name=bucket_region)
+        self.region = bucket_region
+        return True
+
     def bucket_exists(self, bucket: str) -> bool:
         """Return ``True`` if *bucket* exists."""
 
         try:
             self.s3_client.head_bucket(Bucket=bucket)
-        except ClientError:
+        except ClientError as error:
+            if self._maybe_redirect_s3_client(bucket, error):
+                try:
+                    self.s3_client.head_bucket(Bucket=bucket)
+                except ClientError:
+                    return False
+                else:
+                    return True
             return False
         else:
             return True

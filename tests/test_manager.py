@@ -7,6 +7,7 @@ import boto3
 import pytest
 from botocore.response import StreamingBody
 from botocore.stub import Stubber
+from botocore.exceptions import ClientError
 
 from daylily_omics_references import BucketVerificationError, ReferenceBucketManager
 from daylily_omics_references.constants import (
@@ -134,3 +135,60 @@ def test_ensure_bucket_missing_without_create():
                 region="us-west-2",
                 create_missing=False,
             )
+
+
+def _mock_s3_client(region: str) -> mock.Mock:
+    client = mock.Mock()
+    client.meta = mock.Mock()
+    client.meta.region_name = region
+    return client
+
+
+def _permanent_redirect_error(region: str) -> ClientError:
+    return ClientError(
+        {
+            "Error": {"Code": "301", "Message": "Moved Permanently"},
+            "ResponseMetadata": {"HTTPHeaders": {"x-amz-bucket-region": region}},
+        },
+        "HeadBucket",
+    )
+
+
+def test_bucket_exists_redirects_to_bucket_region():
+    session = mock.Mock()
+    first = _mock_s3_client("us-east-1")
+    second = _mock_s3_client("us-west-2")
+    session.client.side_effect = [second]
+
+    manager = ReferenceBucketManager(session=session, s3_client=first)
+    first.head_bucket.side_effect = _permanent_redirect_error("us-west-2")
+    second.head_bucket.return_value = {}
+
+    assert manager.bucket_exists("target")
+    session.client.assert_called_once_with("s3", region_name="us-west-2")
+    assert manager.s3_client is second
+    assert manager.region == "us-west-2"
+
+
+def test_verify_bucket_handles_redirect(monkeypatch):
+    session = mock.Mock()
+    first = _mock_s3_client("us-east-1")
+    second = _mock_s3_client("us-west-2")
+    session.client.side_effect = [second]
+
+    manager = ReferenceBucketManager(session=session, s3_client=first)
+    first.head_bucket.side_effect = _permanent_redirect_error("us-west-2")
+
+    second.head_bucket.return_value = {}
+    second.get_object.return_value = {"Body": _version_body(DEFAULT_REFERENCE_VERSION)}
+
+    def _list_objects_side_effect(**kwargs):
+        return {"Contents": [{"Key": f"{kwargs['Prefix']}dummy"}]}
+
+    second.list_objects_v2.side_effect = _list_objects_side_effect
+
+    manager.verify_bucket("target")
+
+    session.client.assert_called_once_with("s3", region_name="us-west-2")
+    assert manager.s3_client is second
+    assert manager.region == "us-west-2"
