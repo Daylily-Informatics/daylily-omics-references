@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable, List, Sequence
 
 import boto3
-from botocore.exceptions import ClientError
+import botocore.exceptions as botocore_exceptions
 
 from .constants import (
     B37_PREFIXES,
@@ -25,6 +25,9 @@ from .constants import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+ClientError = botocore_exceptions.ClientError
+WaiterError = getattr(botocore_exceptions, "WaiterError", RuntimeError)
 
 
 class BucketVerificationError(RuntimeError):
@@ -166,6 +169,15 @@ class ReferenceBucketManager:
 
         self.logger.info("Creating bucket %s in %s", bucket, region)
         self.s3_client.create_bucket(**create_args)
+
+        self.logger.debug("Waiting for bucket %s to exist", bucket)
+        waiter = self.s3_client.get_waiter("bucket_exists")
+        try:
+            waiter.wait(Bucket=bucket)
+        except WaiterError as error:
+            raise RuntimeError(
+                f"Bucket {bucket} was not available after creation"
+            ) from error
 
         # Accelerate access is always enabled to match the historic behaviour of
         # the shell script this manager supersedes.

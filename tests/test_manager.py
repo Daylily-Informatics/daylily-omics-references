@@ -142,6 +142,9 @@ def _mock_s3_client(region: str) -> mock.Mock:
     client = mock.Mock()
     client.meta = mock.Mock()
     client.meta.region_name = region
+    waiter = mock.Mock()
+    waiter.wait = mock.Mock()
+    client.get_waiter.return_value = waiter
     return client
 
 
@@ -158,6 +161,8 @@ def test_create_bucket_applies_policy():
         Bucket="target",
         CreateBucketConfiguration={"LocationConstraint": "us-west-2"},
     )
+    s3.get_waiter.assert_called_once_with("bucket_exists")
+    s3.get_waiter.return_value.wait.assert_called_once_with(Bucket="target")
     s3.put_bucket_accelerate_configuration.assert_called_once_with(
         Bucket="target", AccelerateConfiguration={"Status": "Enabled"}
     )
@@ -178,6 +183,7 @@ def test_create_bucket_dry_run_skips_api_calls():
     manager.create_bucket("target", "us-west-2", dry_run=True)
 
     s3.create_bucket.assert_not_called()
+    s3.get_waiter.assert_not_called()
     s3.put_bucket_accelerate_configuration.assert_not_called()
     s3.put_bucket_policy.assert_not_called()
 
