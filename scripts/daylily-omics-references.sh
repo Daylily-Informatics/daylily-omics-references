@@ -23,7 +23,6 @@ get_source_bucket_for_version() {
 CORE_PREFIXES=(
   "cluster_boot_config/"
   "data/cached_envs/"
-  "data/lib/"
   "data/tool_specific_resources/"
   "data/budget_tags/"
 )
