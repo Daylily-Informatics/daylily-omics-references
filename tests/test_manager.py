@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 from unittest import mock
 
 import boto3
@@ -24,6 +25,28 @@ from daylily_omics_references.constants import (
 def _version_body(version: str) -> StreamingBody:
     data = version.encode("utf-8")
     return StreamingBody(io.BytesIO(data), len(data))
+
+
+def test_run_copy_command_sets_region_environment():
+    captured_env = {}
+
+    def runner(command, *, check, capture_output, text, env):
+        captured_env.update(env)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    manager = ReferenceBucketManager(region="us-west-2", command_runner=runner)
+
+    manager._run_copy_command(
+        source_bucket="source",
+        destination_bucket="dest",
+        prefix="foo/",
+        dry_run=False,
+        use_acceleration=False,
+        log_file=None,
+    )
+
+    assert captured_env["AWS_REGION"] == "us-west-2"
+    assert captured_env["AWS_DEFAULT_REGION"] == "us-west-2"
 
 
 def test_clone_reference_bucket_dry_run():
