@@ -7,11 +7,18 @@ set -euo pipefail
 DEFAULT_REFERENCE_VERSION="0.7.131c"
 VERSION_INFO_KEY="s3_reference_data_version.info"
 
-# Map of reference version -> source bucket
-# shellcheck disable=SC2034
-declare -A SOURCE_BUCKET_BY_VERSION=(
-  ["${DEFAULT_REFERENCE_VERSION}"]="daylily-omics-analysis-references-public"
-)
+# Map reference versions to source buckets (kept compatible with older Bash versions).
+get_source_bucket_for_version() {
+  local version="$1"
+  case "$version" in
+    "$DEFAULT_REFERENCE_VERSION")
+      printf '%s\n' "daylily-omics-analysis-references-public"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 
 CORE_PREFIXES=(
   "cluster_boot_config/"
@@ -153,8 +160,8 @@ prefix_exists() {
 clone_bucket() {
   local bucket_prefix="$1" region="$2" version="$3" dry_run="$4" include_hg38="$5" include_b37="$6" include_giab="$7" use_accel="$8" log_file="$9"
 
-  local source_bucket=${SOURCE_BUCKET_BY_VERSION[$version]:-}
-  if [[ -z "$source_bucket" ]]; then
+  local source_bucket
+  if ! source_bucket=$(get_source_bucket_for_version "$version"); then
     log ERROR "Unsupported reference version: $version"
     exit 1
   fi
