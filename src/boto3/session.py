@@ -16,6 +16,7 @@ class S3Client:
     def __init__(self, region_name: str | None = None) -> None:
         self.region_name = region_name or "us-east-1"
         self._buckets: Dict[str, Dict[str, bytes]] = {}
+        self._bucket_policies: Dict[str, str] = {}
         self._active_stubber = None
         self.meta = SimpleNamespace(region_name=self.region_name)
 
@@ -28,6 +29,9 @@ class S3Client:
 
     def put_bucket_accelerate_configuration(self, **params: Any) -> Dict[str, Any]:
         return self._dispatch("put_bucket_accelerate_configuration", params)
+
+    def put_bucket_policy(self, **params: Any) -> Dict[str, Any]:
+        return self._dispatch("put_bucket_policy", params)
 
     def put_object(self, **params: Any) -> Dict[str, Any]:
         return self._dispatch("put_object", params)
@@ -67,6 +71,12 @@ class S3Client:
     def _handle_put_bucket_accelerate_configuration(self, Bucket: str, **_: Any) -> Dict[str, Any]:
         if Bucket not in self._buckets:
             raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "PutAccelerate")
+        return {}
+
+    def _handle_put_bucket_policy(self, Bucket: str, Policy: str) -> Dict[str, Any]:
+        if Bucket not in self._buckets:
+            raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "PutBucketPolicy")
+        self._bucket_policies[Bucket] = Policy
         return {}
 
     def _handle_put_object(self, Bucket: str, Key: str, Body: bytes | str) -> Dict[str, Any]:
