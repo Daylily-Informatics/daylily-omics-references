@@ -28,3 +28,8 @@ daylily-omics-references = "daylily_omics_references.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools]
+script-files = [
+  "scripts/daylily-omics-references.sh",
+]
