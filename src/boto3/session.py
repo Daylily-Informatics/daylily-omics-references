@@ -6,7 +6,7 @@ import io
 from types import SimpleNamespace
 from typing import Any, Dict
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, WaiterError
 from botocore.response import StreamingBody
 
 
@@ -41,6 +41,26 @@ class S3Client:
 
     def list_objects_v2(self, **params: Any) -> Dict[str, Any]:
         return self._dispatch("list_objects_v2", params)
+
+    def get_waiter(self, name: str) -> Any:
+        if name != "bucket_exists":
+            raise ValueError(f"Unsupported waiter: {name}")
+
+        class _BucketExistsWaiter:
+            def __init__(self, client: "S3Client") -> None:
+                self._client = client
+
+            def wait(self, *, Bucket: str, **_: Any) -> None:
+                try:
+                    self._client.head_bucket(Bucket=Bucket)
+                except ClientError as error:
+                    raise WaiterError(
+                        name="BucketExists",
+                        reason="Bucket did not become available",
+                        last_response=getattr(error, "response", {}),
+                    )
+
+        return _BucketExistsWaiter(self)
 
     # ------------------------------------------------------------------
     def _dispatch(self, operation: str, params: Dict[str, Any]) -> Dict[str, Any]:

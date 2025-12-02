@@ -15,4 +15,14 @@ class ClientError(Exception):
         super().__init__(message)
 
 
-__all__ = ["ClientError"]
+class WaiterError(Exception):
+    """Lightweight equivalent of :class:`botocore.exceptions.WaiterError`."""
+
+    def __init__(self, name: str, reason: str, last_response: dict | None = None):
+        self.name = name
+        self.reason = reason
+        self.last_response = last_response or {}
+        super().__init__(reason)
+
+
+__all__ = ["ClientError", "WaiterError"]
