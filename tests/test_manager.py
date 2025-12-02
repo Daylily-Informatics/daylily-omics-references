@@ -27,6 +27,17 @@ def _version_body(version: str) -> StreamingBody:
     return StreamingBody(io.BytesIO(data), len(data))
 
 
+def test_s3_client_lists_without_prefix():
+    client = boto3.session.S3Client()
+
+    client.create_bucket(Bucket="target")
+    client.put_object(Bucket="target", Key="example/key", Body=b"data")
+
+    response = client.list_objects_v2(Bucket="target")
+
+    assert response == {"Contents": [{"Key": "example/key"}]}
+
+
 def test_run_copy_command_sets_region_environment_and_profile():
     captured_env = {}
     captured_command = []
