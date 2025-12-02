@@ -116,14 +116,17 @@ class S3Client:
         data = bucket[Key]
         return {"Body": StreamingBody(io.BytesIO(data), len(data))}
 
-    def _handle_list_objects_v2(self, Bucket: str, Prefix: str, MaxKeys: int = 1) -> Dict[str, Any]:
+    def _handle_list_objects_v2(
+        self, Bucket: str, Prefix: str | None = None, MaxKeys: int = 1
+    ) -> Dict[str, Any]:
         bucket = self._buckets.get(Bucket)
         if not bucket:
             return {}
 
         contents = []
+        prefix = Prefix or ""
         for key in bucket:
-            if key.startswith(Prefix):
+            if not prefix or key.startswith(prefix):
                 contents.append({"Key": key})
                 if len(contents) >= MaxKeys:
                     break
