@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shlex
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
@@ -84,6 +85,25 @@ class ReferenceBucketManager:
         self.command_runner = command_runner or subprocess.run
         self.logger = logger or _LOGGER
 
+    def _format_kwargs(self, **kwargs: object) -> str:
+        """Return a stringified version of boto parameters for logging."""
+
+        safe_kwargs = {}
+        for key, value in kwargs.items():
+            if key.lower() in {"body", "content"}:
+                safe_kwargs[key] = "<omitted>"
+            else:
+                safe_kwargs[key] = value
+        return ", ".join(f"{key}={value!r}" for key, value in safe_kwargs.items())
+
+    def _log_boto_call(self, action: str, **kwargs: object) -> None:
+        formatted = self._format_kwargs(**kwargs)
+        self.logger.info("Calling boto3: %s(%s)", action, formatted)
+
+    def _log_boto_response(self, action: str, response: object) -> None:
+        self.logger.info("Completed boto3 call: %s", action)
+        self.logger.debug("Response from %s: %r", action, response)
+
     # ------------------------------------------------------------------
     # Bucket helpers
     # ------------------------------------------------------------------
@@ -114,7 +134,10 @@ class ReferenceBucketManager:
         return True
 
     def _build_bucket_policy(self, bucket: str) -> str:
-        account_id = self.sts_client.get_caller_identity()["Account"]
+        self._log_boto_call("sts.get_caller_identity")
+        caller_identity = self.sts_client.get_caller_identity()
+        self._log_boto_response("sts.get_caller_identity", caller_identity)
+        account_id = caller_identity["Account"]
         bucket_arn = f"arn:aws:s3:::{bucket}"
 
         policy = {
@@ -143,18 +166,21 @@ class ReferenceBucketManager:
     def bucket_exists(self, bucket: str) -> bool:
         """Return ``True`` if *bucket* exists."""
 
+        self._log_boto_call("s3.head_bucket", Bucket=bucket)
         try:
-            self.s3_client.head_bucket(Bucket=bucket)
+            response = self.s3_client.head_bucket(Bucket=bucket)
         except ClientError as error:
             if self._maybe_redirect_s3_client(bucket, error):
                 try:
-                    self.s3_client.head_bucket(Bucket=bucket)
+                    redirected_response = self.s3_client.head_bucket(Bucket=bucket)
                 except ClientError:
                     return False
                 else:
+                    self._log_boto_response("s3.head_bucket", redirected_response)
                     return True
             return False
         else:
+            self._log_boto_response("s3.head_bucket", response)
             return True
 
     def create_bucket(self, bucket: str, region: str, *, dry_run: bool = False) -> None:
@@ -169,10 +195,13 @@ class ReferenceBucketManager:
             create_args["CreateBucketConfiguration"] = {"LocationConstraint": region}
 
         self.logger.info("Creating bucket %s in %s", bucket, region)
-        self.s3_client.create_bucket(**create_args)
+        self._log_boto_call("s3.create_bucket", **create_args)
+        response = self.s3_client.create_bucket(**create_args)
+        self._log_boto_response("s3.create_bucket", response)
 
         self.logger.debug("Waiting for bucket %s to exist", bucket)
         waiter = self.s3_client.get_waiter("bucket_exists")
+        self._log_boto_call("s3.waiter.bucket_exists.wait", Bucket=bucket)
         try:
             waiter.wait(Bucket=bucket)
         except WaiterError as error:
@@ -180,16 +209,27 @@ class ReferenceBucketManager:
                 f"Bucket {bucket} was not available after creation"
             ) from error
 
+        self._log_boto_response("s3.waiter.bucket_exists.wait", "completed")
+
         # Accelerate access is always enabled to match the historic behaviour of
         # the shell script this manager supersedes.
         self.logger.debug("Enabling transfer acceleration for bucket %s", bucket)
-        self.s3_client.put_bucket_accelerate_configuration(
+        self._log_boto_call(
+            "s3.put_bucket_accelerate_configuration",
             Bucket=bucket, AccelerateConfiguration={"Status": "Enabled"}
         )
+        accelerate_response = self.s3_client.put_bucket_accelerate_configuration(
+            Bucket=bucket, AccelerateConfiguration={"Status": "Enabled"}
+        )
+        self._log_boto_response("s3.put_bucket_accelerate_configuration", accelerate_response)
 
         self.logger.debug("Applying bucket policy for bucket %s", bucket)
         policy = self._build_bucket_policy(bucket)
-        self.s3_client.put_bucket_policy(Bucket=bucket, Policy=policy)
+        self._log_boto_call("s3.put_bucket_policy", Bucket=bucket)
+        policy_response = self.s3_client.put_bucket_policy(Bucket=bucket, Policy=policy)
+        self._log_boto_response("s3.put_bucket_policy", policy_response)
+
+        self._log_bucket_cli_list(bucket)
 
     def _wait_for_bucket_listable(
         self, bucket: str, *, attempts: int = 5, delay_seconds: float = 1.0
@@ -198,7 +238,8 @@ class ReferenceBucketManager:
 
         for attempt in range(1, attempts + 1):
             try:
-                self.s3_client.list_objects_v2(Bucket=bucket, MaxKeys=1)
+                self._log_boto_call("s3.list_objects_v2", Bucket=bucket, MaxKeys=1)
+                response = self.s3_client.list_objects_v2(Bucket=bucket, MaxKeys=1)
             except ClientError as error:
                 if self._maybe_redirect_s3_client(bucket, error):
                     continue
@@ -218,6 +259,7 @@ class ReferenceBucketManager:
                 time.sleep(delay_seconds)
             else:
                 self.logger.debug("Bucket %s is listable", bucket)
+                self._log_boto_response("s3.list_objects_v2", response)
                 return
 
     # ------------------------------------------------------------------
@@ -233,19 +275,23 @@ class ReferenceBucketManager:
             return
 
         self.logger.debug("Uploading version marker %s to %s", VERSION_INFO_KEY, bucket)
-        self.s3_client.put_object(
+        self._log_boto_call("s3.put_object", Bucket=bucket, Key=VERSION_INFO_KEY)
+        response = self.s3_client.put_object(
             Bucket=bucket,
             Key=VERSION_INFO_KEY,
             Body=version.encode("utf-8"),
         )
+        self._log_boto_response("s3.put_object", response)
 
     def read_bucket_version(self, bucket: str) -> str | None:
         """Return the version recorded in the bucket, if present."""
 
+        self._log_boto_call("s3.get_object", Bucket=bucket, Key=VERSION_INFO_KEY)
         try:
             response = self.s3_client.get_object(Bucket=bucket, Key=VERSION_INFO_KEY)
         except ClientError:
             return None
+        self._log_boto_response("s3.get_object", response)
 
         body = response.get("Body")
         if body is None:
@@ -490,12 +536,56 @@ class ReferenceBucketManager:
     # Internal helpers
     # ------------------------------------------------------------------
     def _prefix_exists(self, bucket: str, prefix: str) -> bool:
+        self._log_boto_call("s3.list_objects_v2", Bucket=bucket, Prefix=prefix, MaxKeys=1)
         response = self.s3_client.list_objects_v2(
             Bucket=bucket,
             Prefix=prefix,
             MaxKeys=1,
         )
+        self._log_boto_response("s3.list_objects_v2", response)
         return "Contents" in response and bool(response["Contents"])
+
+    def _log_bucket_cli_list(self, bucket: str) -> None:
+        """Run and log a verbose aws s3 ls against ``bucket``."""
+
+        command = ["aws", "s3", "ls", f"s3://{bucket}", "--verbose"]
+        if shutil.which(command[0]) is None:
+            self.logger.warning(
+                "Skipping aws s3 ls verification for %s because the AWS CLI is not installed",
+                bucket,
+            )
+            return
+
+        env = os.environ.copy()
+
+        if self.profile:
+            command.extend(["--profile", self.profile])
+            env["AWS_PROFILE"] = self.profile
+
+        if self.region:
+            env.setdefault("AWS_REGION", self.region)
+            env.setdefault("AWS_DEFAULT_REGION", self.region)
+
+        self.logger.info("Testing bucket visibility with command: %s", " ".join(shlex.quote(part) for part in command))
+        result = self.command_runner(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        if result.stdout:
+            self.logger.debug("aws s3 ls stdout for %s:\n%s", bucket, result.stdout.rstrip())
+        if result.stderr:
+            self.logger.debug("aws s3 ls stderr for %s:\n%s", bucket, result.stderr.rstrip())
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"aws s3 ls verification for bucket {bucket} failed with code {result.returncode}: {result.stderr}"
+            )
+
+        self.logger.info("aws s3 ls verification for bucket %s completed successfully", bucket)
 
     # ------------------------------------------------------------------
     def ensure_bucket(
