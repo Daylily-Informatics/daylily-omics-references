@@ -27,14 +27,18 @@ def _version_body(version: str) -> StreamingBody:
     return StreamingBody(io.BytesIO(data), len(data))
 
 
-def test_run_copy_command_sets_region_environment():
+def test_run_copy_command_sets_region_environment_and_profile():
     captured_env = {}
+    captured_command = []
 
     def runner(command, *, check, capture_output, text, env):
         captured_env.update(env)
+        captured_command.extend(command)
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    manager = ReferenceBucketManager(region="us-west-2", command_runner=runner)
+    manager = ReferenceBucketManager(
+        region="us-west-2", profile="dev-profile", command_runner=runner
+    )
 
     manager._run_copy_command(
         source_bucket="source",
@@ -47,6 +51,8 @@ def test_run_copy_command_sets_region_environment():
 
     assert captured_env["AWS_REGION"] == "us-west-2"
     assert captured_env["AWS_DEFAULT_REGION"] == "us-west-2"
+    assert captured_env["AWS_PROFILE"] == "dev-profile"
+    assert captured_command[-2:] == ["--profile", "dev-profile"]
 
 
 def test_clone_reference_bucket_dry_run():
