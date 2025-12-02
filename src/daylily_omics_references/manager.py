@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shlex
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Callable, List, Sequence
 
 import boto3
-from botocore.exceptions import ClientError
+import botocore.exceptions as botocore_exceptions
 
 from .constants import (
     B37_PREFIXES,
@@ -24,6 +25,9 @@ from .constants import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+ClientError = botocore_exceptions.ClientError
+WaiterError = getattr(botocore_exceptions, "WaiterError", RuntimeError)
 
 
 class BucketVerificationError(RuntimeError):
@@ -56,6 +60,7 @@ class ReferenceBucketManager:
         region: str | None = None,
         session: boto3.session.Session | None = None,
         s3_client=None,
+        sts_client=None,
         command_runner: Callable[..., subprocess.CompletedProcess] | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -63,6 +68,18 @@ class ReferenceBucketManager:
         self.region = region
         self.session = session or boto3.session.Session(profile_name=profile, region_name=region)
         self.s3_client = s3_client or self.session.client("s3")
+        if sts_client is not None:
+            self.sts_client = sts_client
+        else:
+            if s3_client is None:
+                try:
+                    self.sts_client = self.session.client("sts")
+                except Exception:
+                    self.sts_client = boto3.session.Session(profile_name=profile, region_name=region).client(
+                        "sts"
+                    )
+            else:
+                self.sts_client = boto3.session.Session(profile_name=profile, region_name=region).client("sts")
         self.command_runner = command_runner or subprocess.run
         self.logger = logger or _LOGGER
 
@@ -76,7 +93,10 @@ class ReferenceBucketManager:
         headers = metadata.get("HTTPHeaders", {})
         bucket_region = headers.get("x-amz-bucket-region")
 
-        current_region = getattr(self.s3_client.meta, "region_name", None)
+        meta = getattr(self.s3_client, "meta", None)
+        current_region = getattr(meta, "region_name", None) or getattr(
+            self.s3_client, "region_name", None
+        )
         if not bucket_region or bucket_region == current_region:
             return False
 
@@ -91,6 +111,33 @@ class ReferenceBucketManager:
         self.s3_client = self.session.client("s3", region_name=bucket_region)
         self.region = bucket_region
         return True
+
+    def _build_bucket_policy(self, bucket: str) -> str:
+        account_id = self.sts_client.get_caller_identity()["Account"]
+        bucket_arn = f"arn:aws:s3:::{bucket}"
+
+        policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "EnforceTLS",
+                    "Effect": "Deny",
+                    "Principal": "*",
+                    "Action": "s3:*",
+                    "Resource": [bucket_arn, f"{bucket_arn}/*"],
+                    "Condition": {"Bool": {"aws:SecureTransport": "false"}},
+                },
+                {
+                    "Sid": "AllowAccountFullAccess",
+                    "Effect": "Allow",
+                    "Principal": {"AWS": f"arn:aws:iam::{account_id}:root"},
+                    "Action": "s3:*",
+                    "Resource": [bucket_arn, f"{bucket_arn}/*"],
+                },
+            ],
+        }
+
+        return json.dumps(policy)
 
     def bucket_exists(self, bucket: str) -> bool:
         """Return ``True`` if *bucket* exists."""
@@ -123,12 +170,25 @@ class ReferenceBucketManager:
         self.logger.info("Creating bucket %s in %s", bucket, region)
         self.s3_client.create_bucket(**create_args)
 
+        self.logger.debug("Waiting for bucket %s to exist", bucket)
+        waiter = self.s3_client.get_waiter("bucket_exists")
+        try:
+            waiter.wait(Bucket=bucket)
+        except WaiterError as error:
+            raise RuntimeError(
+                f"Bucket {bucket} was not available after creation"
+            ) from error
+
         # Accelerate access is always enabled to match the historic behaviour of
         # the shell script this manager supersedes.
         self.logger.debug("Enabling transfer acceleration for bucket %s", bucket)
         self.s3_client.put_bucket_accelerate_configuration(
             Bucket=bucket, AccelerateConfiguration={"Status": "Enabled"}
         )
+
+        self.logger.debug("Applying bucket policy for bucket %s", bucket)
+        policy = self._build_bucket_policy(bucket)
+        self.s3_client.put_bucket_policy(Bucket=bucket, Policy=policy)
 
     # ------------------------------------------------------------------
     # Version helpers
