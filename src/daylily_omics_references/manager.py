@@ -7,6 +7,7 @@ import logging
 import os
 import shlex
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Sequence
@@ -189,6 +190,35 @@ class ReferenceBucketManager:
         self.logger.debug("Applying bucket policy for bucket %s", bucket)
         policy = self._build_bucket_policy(bucket)
         self.s3_client.put_bucket_policy(Bucket=bucket, Policy=policy)
+
+    def _wait_for_bucket_listable(
+        self, bucket: str, *, attempts: int = 5, delay_seconds: float = 1.0
+    ) -> None:
+        """Wait until ``bucket`` can be listed or raise ``RuntimeError``."""
+
+        for attempt in range(1, attempts + 1):
+            try:
+                self.s3_client.list_objects_v2(Bucket=bucket, MaxKeys=1)
+            except ClientError as error:
+                if self._maybe_redirect_s3_client(bucket, error):
+                    continue
+
+                if attempt == attempts:
+                    raise RuntimeError(
+                        f"Bucket {bucket} is not listable after creation: {error}"
+                    ) from error
+
+                self.logger.debug(
+                    "Bucket %s not listable yet (attempt %d/%d); sleeping %.1fs",
+                    bucket,
+                    attempt,
+                    attempts,
+                    delay_seconds,
+                )
+                time.sleep(delay_seconds)
+            else:
+                self.logger.debug("Bucket %s is listable", bucket)
+                return
 
     # ------------------------------------------------------------------
     # Version helpers
@@ -375,6 +405,9 @@ class ReferenceBucketManager:
 
         # Create bucket (and optionally enable acceleration)
         self.create_bucket(bucket_name, region, dry_run=dry_run)
+        if not dry_run:
+            self.logger.debug("Verifying bucket %s is listable after creation", bucket_name)
+            self._wait_for_bucket_listable(bucket_name)
 
         plan = self._build_copy_plan(
             include_hg38=include_hg38,

@@ -265,3 +265,57 @@ def test_verify_bucket_handles_redirect(monkeypatch):
     session.client.assert_called_once_with("s3", region_name="us-west-2")
     assert manager.s3_client is second
     assert manager.region == "us-west-2"
+
+
+def test_wait_for_bucket_listable_succeeds():
+    session = mock.Mock()
+    client = _mock_s3_client("us-west-2")
+    client.list_objects_v2.return_value = {}
+
+    manager = ReferenceBucketManager(session=session, s3_client=client)
+
+    manager._wait_for_bucket_listable("target", attempts=2, delay_seconds=0)
+
+    client.list_objects_v2.assert_called_once_with(Bucket="target", MaxKeys=1)
+
+
+def test_wait_for_bucket_listable_retries_and_raises(monkeypatch):
+    session = mock.Mock()
+    client = _mock_s3_client("us-west-2")
+    error = ClientError(
+        {"Error": {"Code": "NoSuchBucket", "Message": "Not ready"}},
+        "ListObjectsV2",
+    )
+    client.list_objects_v2.side_effect = error
+    monkeypatch.setattr("time.sleep", lambda seconds: None)
+
+    manager = ReferenceBucketManager(session=session, s3_client=client)
+
+    with pytest.raises(RuntimeError):
+        manager._wait_for_bucket_listable("target", attempts=2, delay_seconds=0)
+
+    assert client.list_objects_v2.call_count == 2
+
+
+def test_clone_reference_bucket_waits_for_listable():
+    manager = ReferenceBucketManager()
+
+    with mock.patch.object(manager, "bucket_exists", return_value=False), \
+        mock.patch.object(manager, "create_bucket") as mock_create, \
+        mock.patch.object(manager, "_wait_for_bucket_listable") as mock_wait, \
+        mock.patch.object(manager, "write_version_file") as mock_write, \
+        mock.patch.object(manager, "_run_copy_command") as mock_copy:
+        bucket = manager.clone_reference_bucket(
+            bucket_prefix="test",
+            region="us-west-2",
+            dry_run=False,
+            include_hg38=False,
+            include_b37=False,
+            include_giab=False,
+        )
+
+    assert bucket == "test-omics-analysis-us-west-2"
+    mock_create.assert_called_once_with(bucket, "us-west-2", dry_run=False)
+    mock_wait.assert_called_once_with(bucket)
+    mock_write.assert_called_once_with(bucket, DEFAULT_REFERENCE_VERSION, dry_run=False)
+    assert mock_copy.call_count == len(CORE_PREFIXES)
