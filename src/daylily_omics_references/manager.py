@@ -307,6 +307,11 @@ class ReferenceBucketManager:
         if self.profile:
             env["AWS_PROFILE"] = self.profile
 
+        if self.region:
+            # Ensure the AWS CLI uses the same region as the boto3 session
+            env.setdefault("AWS_REGION", self.region)
+            env.setdefault("AWS_DEFAULT_REGION", self.region)
+
         if dry_run:
             self.logger.info("[dry-run] %s", " ".join(shlex.quote(part) for part in command))
             return
