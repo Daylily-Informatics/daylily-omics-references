@@ -300,6 +300,9 @@ class ReferenceBucketManager:
             "REPLACE",
         ]
 
+        if self.profile:
+            command.extend(["--profile", self.profile])
+
         if use_acceleration:
             command.extend(["--endpoint-url", "https://s3-accelerate.amazonaws.com"])
 
