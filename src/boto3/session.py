@@ -100,15 +100,29 @@ class S3Client:
         return {"Contents": contents}
 
 
+class _StsClient:
+    def __init__(self, account_id: str):
+        self._account_id = account_id
+
+    def get_caller_identity(self) -> Dict[str, str]:
+        return {"Account": self._account_id}
+
+
 class Session:
     """A simplified analogue of :class:`boto3.session.Session`."""
 
-    def __init__(self, profile_name: str | None = None, region_name: str | None = None) -> None:
+    def __init__(
+        self, profile_name: str | None = None, region_name: str | None = None, account_id: str = "000000000000"
+    ) -> None:
         self.profile_name = profile_name
         self.region_name = region_name or "us-east-1"
+        self._account_id = account_id
         self._clients: Dict[str, Any] = {}
 
     def client(self, service_name: str) -> Any:
+        if service_name == "sts":
+            return _StsClient(self._account_id)
+
         if service_name != "s3":
             raise ValueError(f"Unsupported service: {service_name}")
         if service_name not in self._clients:
