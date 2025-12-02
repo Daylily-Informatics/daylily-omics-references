@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from types import SimpleNamespace
 from typing import Any, Dict
 
 from botocore.exceptions import ClientError
@@ -16,6 +17,7 @@ class S3Client:
         self.region_name = region_name or "us-east-1"
         self._buckets: Dict[str, Dict[str, bytes]] = {}
         self._active_stubber = None
+        self.meta = SimpleNamespace(region_name=self.region_name)
 
     # ------------------------------------------------------------------
     def head_bucket(self, **params: Any) -> Dict[str, Any]:
@@ -119,15 +121,18 @@ class Session:
         self._account_id = account_id
         self._clients: Dict[str, Any] = {}
 
-    def client(self, service_name: str) -> Any:
+    def client(self, service_name: str, *, region_name: str | None = None) -> Any:
         if service_name == "sts":
             return _StsClient(self._account_id)
 
         if service_name != "s3":
             raise ValueError(f"Unsupported service: {service_name}")
-        if service_name not in self._clients:
-            self._clients[service_name] = S3Client(self.region_name)
-        return self._clients[service_name]
+
+        client_region = region_name or self.region_name
+        key = (service_name, client_region)
+        if key not in self._clients:
+            self._clients[key] = S3Client(client_region)
+        return self._clients[key]
 
 
 __all__ = ["Session", "S3Client"]

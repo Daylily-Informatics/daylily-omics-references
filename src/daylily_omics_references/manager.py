@@ -90,7 +90,10 @@ class ReferenceBucketManager:
         headers = metadata.get("HTTPHeaders", {})
         bucket_region = headers.get("x-amz-bucket-region")
 
-        current_region = getattr(self.s3_client.meta, "region_name", None)
+        meta = getattr(self.s3_client, "meta", None)
+        current_region = getattr(meta, "region_name", None) or getattr(
+            self.s3_client, "region_name", None
+        )
         if not bucket_region or bucket_region == current_region:
             return False
 
