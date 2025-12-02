@@ -130,13 +130,7 @@ copy_prefix() {
   if [[ "$use_accel" == true ]]; then
     endpoint_args=("--endpoint-url" "https://s3-accelerate.amazonaws.com")
   fi
-
-  local excludes=()
-  if [[ "$prefix" == "cluster_boot_config/" ]]; then
-    excludes=("--exclude" "mine_cron.sh" "--exclude" "pcluster_env.yml")
-  fi
-
-  local cmd=(aws s3 cp "s3://$source_bucket/$prefix" "s3://$dest_bucket/$prefix" --recursive --request-payer requester --metadata-directive REPLACE "${endpoint_args[@]}" "${excludes[@]}")
+  local cmd=(aws s3 cp "s3://$source_bucket/$prefix" "s3://$dest_bucket/$prefix" --recursive --request-payer requester --metadata-directive REPLACE "${endpoint_args[@]}")
 
   if [[ "$dry_run" == true ]]; then
     log INFO "[dry-run] ${cmd[*]}"
