@@ -548,7 +548,7 @@ class ReferenceBucketManager:
     def _log_bucket_cli_list(self, bucket: str) -> None:
         """Run and log a verbose aws s3 ls against ``bucket``."""
 
-        command = ["aws", "s3", "ls", f"s3://{bucket}", "--verbose"]
+        command = ["aws", "s3", "ls", f"s3://{bucket}"]
         if shutil.which(command[0]) is None:
             self.logger.warning(
                 "Skipping aws s3 ls verification for %s because the AWS CLI is not installed",
