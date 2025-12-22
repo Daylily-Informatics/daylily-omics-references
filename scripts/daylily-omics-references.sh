@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
+# daylily-omics-references.sh
 set -euo pipefail
+
+# --- zsh compatibility -------------------------------------------------------
+# If someone runs: zsh scripts/daylily-omics-references.sh ...
+# this makes zsh behave close enough to bash for this script.
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+  emulate -L bash
+  setopt SH_WORD_SPLIT
+fi
 
 # Shell-based replacement for the daylily-omics-references CLI.
 # Relies solely on the AWS CLI and standard Unix utilities.
 
 DEFAULT_REFERENCE_VERSION="0.7.131c"
 VERSION_INFO_KEY="s3_reference_data_version.info"
+VERBOSE=false
 
 # Map reference versions to source buckets (kept compatible with older Bash versions).
 get_source_bucket_for_version() {
@@ -50,6 +60,23 @@ require_binary() {
   fi
 }
 
+print_cmd() {
+  # prints copy-pasteable, shell-escaped command line
+  printf '$' >&2
+  local arg
+  for arg in "$@"; do
+    printf ' %q' "$arg" >&2
+  done
+  printf '\n' >&2
+}
+
+run_cmd() {
+  if [[ "$VERBOSE" == true ]]; then
+    print_cmd "$@"
+  fi
+  "$@"
+}
+
 set_aws_env() {
   local profile="$1"
   local region="$2"
@@ -84,19 +111,25 @@ create_bucket() {
   fi
 
   log INFO "Creating bucket $bucket in $region"
-  aws s3api create-bucket "${args[@]}"
+  run_cmd aws s3api create-bucket "${args[@]}"
+
   log INFO "Waiting for bucket $bucket to become listable"
-  aws s3api wait bucket-exists --bucket "$bucket"
-  aws s3api put-bucket-accelerate-configuration --bucket "$bucket" --accelerate-configuration Status=Enabled
+  run_cmd aws s3api wait bucket-exists --bucket "$bucket"
+
+  run_cmd aws s3api put-bucket-accelerate-configuration \
+    --bucket "$bucket" \
+    --accelerate-configuration Status=Enabled
 
   local account_id
   account_id=$(aws sts get-caller-identity --query Account --output text)
+
   local policy
   policy=$(cat <<POLICY
 {"Version":"2012-10-17","Statement":[{"Sid":"EnforceTLS","Effect":"Deny","Principal":"*","Action":"s3:*","Resource":["arn:aws:s3:::$bucket","arn:aws:s3:::$bucket/*"],"Condition":{"Bool":{"aws:SecureTransport":"false"}}},{"Sid":"AllowAccountFullAccess","Effect":"Allow","Principal":{"AWS":"arn:aws:iam::$account_id:root"},"Action":"s3:*","Resource":["arn:aws:s3:::$bucket","arn:aws:s3:::$bucket/*"]}]}
 POLICY
 )
-  aws s3api put-bucket-policy --bucket "$bucket" --policy "$policy"
+
+  run_cmd aws s3api put-bucket-policy --bucket "$bucket" --policy "$policy"
 }
 
 wait_for_bucket_listable() {
@@ -120,30 +153,50 @@ write_version_file() {
     log INFO "[dry-run] Would upload $VERSION_INFO_KEY with version $version"
     return
   fi
+  # stdin upload
+  if [[ "$VERBOSE" == true ]]; then
+    print_cmd aws s3 cp - "s3://$bucket/$VERSION_INFO_KEY"
+  fi
   printf '%s' "$version" | aws s3 cp - "s3://$bucket/$VERSION_INFO_KEY"
 }
 
 copy_prefix() {
   local source_bucket="$1" dest_bucket="$2" prefix="$3" dry_run="$4" use_accel="$5" log_file="$6"
+
   local endpoint_args=()
   if [[ "$use_accel" == true ]]; then
     endpoint_args=("--endpoint-url" "https://s3-accelerate.amazonaws.com")
   fi
-  local cmd=(aws s3 cp "s3://$source_bucket/$prefix" "s3://$dest_bucket/$prefix" --recursive --request-payer requester --metadata-directive REPLACE "${endpoint_args[@]}")
+
+  local cmd=(
+    aws s3 cp
+    "s3://$source_bucket/$prefix"
+    "s3://$dest_bucket/$prefix"
+    --recursive
+    --request-payer requester
+  )
+
+  # Only append optional args if present (bash+zsh safe under -u)
+  if (( ${#endpoint_args[@]} )); then
+    cmd+=("${endpoint_args[@]}")
+  fi
 
   if [[ "$dry_run" == true ]]; then
     log INFO "[dry-run] ${cmd[*]}"
+    if [[ "$VERBOSE" == true ]]; then
+      print_cmd "${cmd[@]}"
+    fi
     return
   fi
 
   if [[ -n "$log_file" ]]; then
     mkdir -p "$(dirname "$log_file")"
     {
-      printf '$ %s\n' "${cmd[*]}"
+      print_cmd "${cmd[@]}"
       "${cmd[@]}"
     } >> "$log_file" 2>&1
   else
-    "${cmd[@]}"
+    run_cmd "${cmd[@]}"
   fi
 }
 
@@ -239,6 +292,7 @@ verify_bucket() {
 ensure_bucket() {
   local bucket_prefix="$1" region="$2" version="$3" include_hg38="$4" include_b37="$5" include_giab="$6" use_accel="$7" log_file="$8" dry_run="$9" create_missing="${10}"
   local bucket_name="${bucket_prefix}-omics-analysis-${region}"
+
   if bucket_exists "$bucket_name"; then
     verify_bucket "$bucket_name" "$version" "$include_hg38" "$include_b37" "$include_giab"
     printf '%s\n' "$bucket_name"
@@ -253,14 +307,14 @@ ensure_bucket() {
   log INFO "Bucket $bucket_name is missing; cloning reference data (dry_run=$dry_run)"
   clone_bucket "$bucket_prefix" "$region" "$version" "$dry_run" "$include_hg38" "$include_b37" "$include_giab" "$use_accel" "$log_file"
 }
-
 usage() {
   cat <<'USAGE'
 Usage: daylily-omics-references.sh [GLOBAL OPTIONS] <command> [ARGS]
 
-Global options:
+xsGlobal options:
   --profile PROFILE   AWS profile to use
   --region REGION     AWS region to target (required for clone/ensure)
+  --verbose           Print every command executed
 
 Commands:
   clone   Create a new reference bucket from the public source
@@ -330,12 +384,15 @@ USAGE
 
 main() {
   require_binary aws
-  local profile="" region=""
+  require_binary jq
+
+  local profile="" region="" cmd=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --profile) profile="$2"; shift 2 ;;
       --region) region="$2"; shift 2 ;;
+      --verbose) VERBOSE=true; shift ;;
       clone|verify|ensure) cmd="$1"; shift; break ;;
       -h|--help) usage; exit 0 ;;
       *) log ERROR "Unknown option: $1"; usage; exit 1 ;;
@@ -415,8 +472,12 @@ main() {
       [[ -z "$bucket_prefix" || -z "$region" ]] && { log ERROR "--bucket-prefix and --region are required"; exit 1; }
       ensure_bucket "$bucket_prefix" "$region" "$version" "$include_hg38" "$include_b37" "$include_giab" "$use_accel" "$log_file" "$dry_run" "$create_missing"
       ;;
+    *)
+      log ERROR "Unknown command: $cmd"
+      usage
+      exit 1
+      ;;
   esac
 }
 
 main "$@"
- 
