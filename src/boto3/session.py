@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from types import SimpleNamespace
 from typing import Any, Dict
 
 from botocore.exceptions import ClientError
@@ -15,7 +16,9 @@ class S3Client:
     def __init__(self, region_name: str | None = None) -> None:
         self.region_name = region_name or "us-east-1"
         self._buckets: Dict[str, Dict[str, bytes]] = {}
+        self._bucket_policies: Dict[str, str] = {}
         self._active_stubber = None
+        self.meta = SimpleNamespace(region_name=self.region_name)
 
     # ------------------------------------------------------------------
     def head_bucket(self, **params: Any) -> Dict[str, Any]:
@@ -26,6 +29,9 @@ class S3Client:
 
     def put_bucket_accelerate_configuration(self, **params: Any) -> Dict[str, Any]:
         return self._dispatch("put_bucket_accelerate_configuration", params)
+
+    def put_bucket_policy(self, **params: Any) -> Dict[str, Any]:
+        return self._dispatch("put_bucket_policy", params)
 
     def put_object(self, **params: Any) -> Dict[str, Any]:
         return self._dispatch("put_object", params)
@@ -65,6 +71,12 @@ class S3Client:
     def _handle_put_bucket_accelerate_configuration(self, Bucket: str, **_: Any) -> Dict[str, Any]:
         if Bucket not in self._buckets:
             raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "PutAccelerate")
+        return {}
+
+    def _handle_put_bucket_policy(self, Bucket: str, Policy: str) -> Dict[str, Any]:
+        if Bucket not in self._buckets:
+            raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "PutBucketPolicy")
+        self._bucket_policies[Bucket] = Policy
         return {}
 
     def _handle_put_object(self, Bucket: str, Key: str, Body: bytes | str) -> Dict[str, Any]:
@@ -119,15 +131,18 @@ class Session:
         self._account_id = account_id
         self._clients: Dict[str, Any] = {}
 
-    def client(self, service_name: str) -> Any:
+    def client(self, service_name: str, *, region_name: str | None = None) -> Any:
         if service_name == "sts":
             return _StsClient(self._account_id)
 
         if service_name != "s3":
             raise ValueError(f"Unsupported service: {service_name}")
-        if service_name not in self._clients:
-            self._clients[service_name] = S3Client(self.region_name)
-        return self._clients[service_name]
+
+        client_region = region_name or self.region_name
+        key = (service_name, client_region)
+        if key not in self._clients:
+            self._clients[key] = S3Client(client_region)
+        return self._clients[key]
 
 
 __all__ = ["Session", "S3Client"]
