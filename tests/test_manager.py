@@ -86,6 +86,27 @@ def test_clone_reference_bucket_dry_run():
     assert mock_copy.call_count == expected_calls
 
 
+def test_clone_reference_bucket_dry_run_excludes_data_lib_prefix():
+    manager = ReferenceBucketManager()
+
+    with mock.patch.object(manager, "bucket_exists", return_value=False), \
+        mock.patch.object(manager, "create_bucket"), \
+        mock.patch.object(manager, "write_version_file"), \
+        mock.patch.object(manager, "_run_copy_command") as mock_copy:
+        manager.clone_reference_bucket(
+            bucket_prefix="test",
+            region="us-west-2",
+            dry_run=True,
+            include_hg38=False,
+            include_b37=False,
+            include_giab=False,
+        )
+
+    copied_prefixes = [call.kwargs["prefix"] for call in mock_copy.call_args_list]
+    assert copied_prefixes == list(CORE_PREFIXES)
+    assert "data/lib/" not in copied_prefixes
+
+
 @pytest.mark.parametrize(
     "include_hg38,include_b37,include_giab",
     [
@@ -127,6 +148,28 @@ def test_verify_bucket_success(include_hg38: bool, include_b37: bool, include_gi
             include_b37=include_b37,
             include_giab=include_giab,
         )
+
+
+def test_verify_bucket_excludes_data_lib_prefix():
+    manager = ReferenceBucketManager()
+
+    with mock.patch.object(manager, "bucket_exists", return_value=True), \
+        mock.patch.object(manager, "read_bucket_version", return_value=DEFAULT_REFERENCE_VERSION), \
+        mock.patch.object(manager, "_prefix_exists", return_value=True) as mock_prefix_exists:
+        manager.verify_bucket(
+            "target",
+            include_hg38=False,
+            include_b37=False,
+            include_giab=False,
+        )
+
+    checked_prefixes = [call.args[1] for call in mock_prefix_exists.call_args_list]
+    assert checked_prefixes == list(CORE_PREFIXES)
+    assert "data/lib/" not in checked_prefixes
+
+
+def test_core_prefixes_do_not_include_data_lib():
+    assert "data/lib/" not in CORE_PREFIXES
 
 
 def test_verify_bucket_missing_prefix():
