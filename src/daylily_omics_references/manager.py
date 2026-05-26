@@ -19,6 +19,8 @@ import botocore.exceptions as botocore_exceptions
 from .constants import (
     B37_PREFIXES,
     CORE_PREFIXES,
+    DAYEC_REQUIRED_OBJECT_KEYS,
+    DAYEC_REQUIRED_PREFIXES,
     DEFAULT_REFERENCE_VERSION,
     GIAB_PREFIXES,
     HG38_PREFIXES,
@@ -525,6 +527,14 @@ class ReferenceBucketManager:
             if not self._prefix_exists(bucket, prefix):
                 issues.append(f"missing objects under {prefix}")
 
+        for prefix in DAYEC_REQUIRED_PREFIXES:
+            if not self._prefix_exists(bucket, prefix):
+                issues.append(f"missing DAY-EC required objects under {prefix}")
+
+        for key in DAYEC_REQUIRED_OBJECT_KEYS:
+            if not self._object_exists(bucket, key):
+                issues.append(f"missing DAY-EC required object {key}")
+
         if issues:
             raise BucketVerificationError(bucket, issues)
 
@@ -544,6 +554,24 @@ class ReferenceBucketManager:
         )
         self._log_boto_response("s3.list_objects_v2", response)
         return "Contents" in response and bool(response["Contents"])
+
+    def _object_exists(self, bucket: str, key: str) -> bool:
+        self._log_boto_call("s3.head_object", Bucket=bucket, Key=key)
+        try:
+            response = self.s3_client.head_object(Bucket=bucket, Key=key)
+        except ClientError as error:
+            if self._maybe_redirect_s3_client(bucket, error):
+                try:
+                    redirected_response = self.s3_client.head_object(Bucket=bucket, Key=key)
+                except ClientError:
+                    return False
+                else:
+                    self._log_boto_response("s3.head_object", redirected_response)
+                    return True
+            return False
+        else:
+            self._log_boto_response("s3.head_object", response)
+            return True
 
     def _log_bucket_cli_list(self, bucket: str) -> None:
         """Run and log a verbose aws s3 ls against ``bucket``."""

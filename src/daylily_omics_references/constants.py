@@ -19,6 +19,17 @@ CORE_PREFIXES = (
     "data/budget_tags/",
 )
 
+# Exact assets DAY-EC must see under /fsx/data before workflow launch.
+DAYEC_REQUIRED_OBJECT_KEYS = (
+    "data/cached_envs/apptainer_1.4.5_amd64.deb",
+    "data/tool_specific_resources/cromwell_87.jar",
+    "data/tool_specific_resources/womtool_87.jar",
+)
+
+DAYEC_REQUIRED_PREFIXES = (
+    "data/cached_envs/conda/",
+)
+
 # Optional prefixes that may be toggled via CLI flags.
 HG38_PREFIXES = (
     "data/genomic_data/organism_references/H_sapiens/hg38/",

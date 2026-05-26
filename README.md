@@ -53,9 +53,9 @@ scripts/daylily-omics-references.sh \
   --bucket myorg-omics-analysis-us-west-2
 ```
 
-This validates that the bucket exists, contains the expected folder structure
-and that its `s3_reference_data_version.info` marker matches the default
-version.
+This validates that the bucket exists, contains the expected folder structure,
+has the exact DAY-EC headnode readiness objects that mount under `/fsx/data`,
+and that its `s3_reference_data_version.info` marker matches the default version.
 
 ### Ensure a bucket is ready for `daylily-ephemeral-cluster`
 

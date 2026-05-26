@@ -15,6 +15,8 @@ from daylily_omics_references import BucketVerificationError, ReferenceBucketMan
 from daylily_omics_references.constants import (
     B37_PREFIXES,
     CORE_PREFIXES,
+    DAYEC_REQUIRED_OBJECT_KEYS,
+    DAYEC_REQUIRED_PREFIXES,
     DEFAULT_REFERENCE_VERSION,
     GIAB_PREFIXES,
     HG38_PREFIXES,
@@ -141,6 +143,18 @@ def test_verify_bucket_success(include_hg38: bool, include_b37: bool, include_gi
                 {"Contents": [{"Key": f"{prefix}dummy"}]},
                 {"Bucket": "target", "Prefix": prefix, "MaxKeys": 1},
             )
+        for prefix in DAYEC_REQUIRED_PREFIXES:
+            stubber.add_response(
+                "list_objects_v2",
+                {"Contents": [{"Key": f"{prefix}dummy"}]},
+                {"Bucket": "target", "Prefix": prefix, "MaxKeys": 1},
+            )
+        for key in DAYEC_REQUIRED_OBJECT_KEYS:
+            stubber.add_response(
+                "head_object",
+                {},
+                {"Bucket": "target", "Key": key},
+            )
 
         manager.verify_bucket(
             "target",
@@ -155,7 +169,8 @@ def test_verify_bucket_excludes_data_lib_prefix():
 
     with mock.patch.object(manager, "bucket_exists", return_value=True), \
         mock.patch.object(manager, "read_bucket_version", return_value=DEFAULT_REFERENCE_VERSION), \
-        mock.patch.object(manager, "_prefix_exists", return_value=True) as mock_prefix_exists:
+        mock.patch.object(manager, "_prefix_exists", return_value=True) as mock_prefix_exists, \
+        mock.patch.object(manager, "_object_exists", return_value=True) as mock_object_exists:
         manager.verify_bucket(
             "target",
             include_hg38=False,
@@ -164,7 +179,9 @@ def test_verify_bucket_excludes_data_lib_prefix():
         )
 
     checked_prefixes = [call.args[1] for call in mock_prefix_exists.call_args_list]
-    assert checked_prefixes == list(CORE_PREFIXES)
+    assert checked_prefixes == list(CORE_PREFIXES) + list(DAYEC_REQUIRED_PREFIXES)
+    checked_objects = [call.args[1] for call in mock_object_exists.call_args_list]
+    assert checked_objects == list(DAYEC_REQUIRED_OBJECT_KEYS)
     assert "data/lib/" not in checked_prefixes
 
 
@@ -203,11 +220,74 @@ def test_verify_bucket_missing_prefix():
                     {"Contents": [{"Key": f"{prefix}dummy"}]},
                     {"Bucket": "target", "Prefix": prefix, "MaxKeys": 1},
                 )
+        for prefix in DAYEC_REQUIRED_PREFIXES:
+            stubber.add_response(
+                "list_objects_v2",
+                {"Contents": [{"Key": f"{prefix}dummy"}]},
+                {"Bucket": "target", "Prefix": prefix, "MaxKeys": 1},
+            )
+        for key in DAYEC_REQUIRED_OBJECT_KEYS:
+            stubber.add_response(
+                "head_object",
+                {},
+                {"Bucket": "target", "Key": key},
+            )
 
         with pytest.raises(BucketVerificationError) as exc:
             manager.verify_bucket("target")
 
     assert "missing objects" in str(exc.value)
+
+
+def test_verify_bucket_missing_dayec_required_object():
+    session = boto3.session.Session(region_name="us-west-2")
+    client = session.client("s3")
+    manager = ReferenceBucketManager(session=session, s3_client=client)
+    stubber = Stubber(client)
+
+    prefixes = list(CORE_PREFIXES) + list(HG38_PREFIXES) + list(B37_PREFIXES) + list(GIAB_PREFIXES)
+    missing_key = DAYEC_REQUIRED_OBJECT_KEYS[0]
+
+    with stubber:
+        stubber.add_response("head_bucket", {}, {"Bucket": "target"})
+        stubber.add_response(
+            "get_object",
+            {"Body": _version_body(DEFAULT_REFERENCE_VERSION)},
+            {"Bucket": "target", "Key": VERSION_INFO_KEY},
+        )
+        for prefix in prefixes:
+            stubber.add_response(
+                "list_objects_v2",
+                {"Contents": [{"Key": f"{prefix}dummy"}]},
+                {"Bucket": "target", "Prefix": prefix, "MaxKeys": 1},
+            )
+        for prefix in DAYEC_REQUIRED_PREFIXES:
+            stubber.add_response(
+                "list_objects_v2",
+                {"Contents": [{"Key": f"{prefix}dummy"}]},
+                {"Bucket": "target", "Prefix": prefix, "MaxKeys": 1},
+            )
+        for key in DAYEC_REQUIRED_OBJECT_KEYS:
+            if key == missing_key:
+                stubber.add_response(
+                    "head_object",
+                    ClientError(
+                        {"Error": {"Code": "404", "Message": "Not Found"}},
+                        "HeadObject",
+                    ),
+                    {"Bucket": "target", "Key": key},
+                )
+            else:
+                stubber.add_response(
+                    "head_object",
+                    {},
+                    {"Bucket": "target", "Key": key},
+                )
+
+        with pytest.raises(BucketVerificationError) as exc:
+            manager.verify_bucket("target")
+
+    assert f"missing DAY-EC required object {missing_key}" in str(exc.value)
 
 
 def test_ensure_bucket_missing_without_create():
@@ -238,7 +318,8 @@ def test_create_bucket_applies_policy():
 
     manager = ReferenceBucketManager(s3_client=s3, sts_client=sts)
 
-    manager.create_bucket("target", "us-west-2", dry_run=False)
+    with mock.patch.object(manager, "_log_bucket_cli_list") as mock_log_bucket_cli_list:
+        manager.create_bucket("target", "us-west-2", dry_run=False)
 
     s3.create_bucket.assert_called_once_with(
         Bucket="target",
@@ -255,6 +336,7 @@ def test_create_bucket_applies_policy():
     assert {"AWS": "arn:aws:iam::123456789012:root"} in [
         statement.get("Principal") for statement in policy["Statement"]
     ]
+    mock_log_bucket_cli_list.assert_called_once_with("target")
 
 
 def test_create_bucket_dry_run_skips_api_calls():
@@ -313,6 +395,7 @@ def test_verify_bucket_handles_redirect(monkeypatch):
         return {"Contents": [{"Key": f"{kwargs['Prefix']}dummy"}]}
 
     second.list_objects_v2.side_effect = _list_objects_side_effect
+    second.head_object.return_value = {}
 
     manager.verify_bucket("target")
 
