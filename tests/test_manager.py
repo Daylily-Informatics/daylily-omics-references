@@ -187,6 +187,8 @@ def test_verify_bucket_excludes_data_lib_prefix():
 
 def test_core_prefixes_do_not_include_data_lib():
     assert "data/lib/" not in CORE_PREFIXES
+    assert "data/genomic_data/" not in CORE_PREFIXES
+    assert all(prefix.startswith("runtime_assets/") for prefix in CORE_PREFIXES)
 
 
 def test_verify_bucket_missing_prefix():
@@ -288,6 +290,73 @@ def test_verify_bucket_missing_dayec_required_object():
             manager.verify_bucket("target")
 
     assert f"missing DAY-EC required object {missing_key}" in str(exc.value)
+
+
+def test_verify_bucket_private_lsmc_style_allows_private_runtime_assets():
+    manager = ReferenceBucketManager()
+
+    with mock.patch.object(manager, "bucket_exists", return_value=True), \
+        mock.patch.object(manager, "read_bucket_version", return_value=DEFAULT_REFERENCE_VERSION), \
+        mock.patch.object(manager, "_prefix_exists", return_value=True), \
+        mock.patch.object(manager, "_object_exists", return_value=True), \
+        mock.patch.object(
+            manager,
+            "_iter_keys_with_prefix",
+            return_value=[
+                "runtime_assets/cached_envs/x.lic",
+                "runtime_assets/cached_envs/sentieon-genomics-202503.02/bin/sentieon",
+                "runtime_assets/budget_tags/pcluster-project-budget-tags.tsv",
+            ],
+        ) as mock_iter:
+        manager.verify_bucket("target", include_b37=False, public_safe=False)
+
+    mock_iter.assert_not_called()
+
+
+def test_verify_bucket_public_safe_rejects_private_runtime_assets():
+    manager = ReferenceBucketManager()
+
+    with mock.patch.object(manager, "bucket_exists", return_value=True), \
+        mock.patch.object(manager, "read_bucket_version", return_value=DEFAULT_REFERENCE_VERSION), \
+        mock.patch.object(manager, "_prefix_exists", return_value=True), \
+        mock.patch.object(manager, "_object_exists", return_value=True), \
+        mock.patch.object(
+            manager,
+            "_iter_keys_with_prefix",
+            return_value=[
+                "runtime_assets/cached_envs/x.lic",
+                "runtime_assets/cached_envs/sentieon-genomics-202503.02/bin/sentieon",
+                "runtime_assets/budget_tags/pcluster-project-budget-tags.tsv",
+                "runtime_assets/tool_specific_resources/lsmc-helper.txt",
+            ],
+        ):
+        with pytest.raises(BucketVerificationError) as exc:
+            manager.verify_bucket("target", include_b37=False, public_safe=True)
+
+    message = str(exc.value)
+    assert "x.lic" in message
+    assert "sentieon-genomics" in message
+    assert "budget_tags" in message
+    assert "lsmc-helper" in message
+
+
+def test_verify_bucket_public_safe_accepts_public_runtime_helpers():
+    manager = ReferenceBucketManager()
+
+    with mock.patch.object(manager, "bucket_exists", return_value=True), \
+        mock.patch.object(manager, "read_bucket_version", return_value=DEFAULT_REFERENCE_VERSION), \
+        mock.patch.object(manager, "_prefix_exists", return_value=True), \
+        mock.patch.object(manager, "_object_exists", return_value=True), \
+        mock.patch.object(
+            manager,
+            "_iter_keys_with_prefix",
+            return_value=[
+                "runtime_assets/cluster_boot_config/post_install_ubuntu_combined.sh",
+                "runtime_assets/tool_specific_resources/cromwell_87.jar",
+                "runtime_assets/tool_specific_resources/womtool_87.jar",
+            ],
+        ):
+        manager.verify_bucket("target", include_b37=False, public_safe=True)
 
 
 def test_ensure_bucket_missing_without_create():

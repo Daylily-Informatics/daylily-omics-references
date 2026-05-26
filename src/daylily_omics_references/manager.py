@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -24,6 +25,8 @@ from .constants import (
     DEFAULT_REFERENCE_VERSION,
     GIAB_PREFIXES,
     HG38_PREFIXES,
+    PUBLIC_FORBIDDEN_KEY_FRAGMENTS,
+    PUBLIC_SAFE_SCAN_PREFIXES,
     SOURCE_BUCKET_BY_VERSION,
     VERSION_INFO_KEY,
 )
@@ -497,6 +500,7 @@ class ReferenceBucketManager:
         include_hg38: bool = True,
         include_b37: bool = True,
         include_giab: bool = True,
+        public_safe: bool = False,
     ) -> None:
         """Verify that *bucket* contains the expected structure and version."""
 
@@ -535,6 +539,9 @@ class ReferenceBucketManager:
             if not self._object_exists(bucket, key):
                 issues.append(f"missing DAY-EC required object {key}")
 
+        if public_safe:
+            issues.extend(self._public_safe_issues(bucket))
+
         if issues:
             raise BucketVerificationError(bucket, issues)
 
@@ -572,6 +579,36 @@ class ReferenceBucketManager:
         else:
             self._log_boto_response("s3.head_object", response)
             return True
+
+    def _iter_keys_with_prefix(self, bucket: str, prefix: str) -> List[str]:
+        keys: List[str] = []
+        token = None
+        while True:
+            kwargs = {"Bucket": bucket, "Prefix": prefix, "MaxKeys": 1000}
+            if token:
+                kwargs["ContinuationToken"] = token
+            self._log_boto_call("s3.list_objects_v2", **kwargs)
+            response = self.s3_client.list_objects_v2(**kwargs)
+            self._log_boto_response("s3.list_objects_v2", response)
+            keys.extend(str(item.get("Key", "")) for item in response.get("Contents", []))
+            if not response.get("IsTruncated"):
+                return [key for key in keys if key]
+            token = response.get("NextContinuationToken")
+            if not token:
+                raise RuntimeError(
+                    f"S3 listing for {bucket}/{prefix} was truncated without a continuation token"
+                )
+
+    def _public_safe_issues(self, bucket: str) -> List[str]:
+        issues: List[str] = []
+        for prefix in PUBLIC_SAFE_SCAN_PREFIXES:
+            for key in self._iter_keys_with_prefix(bucket, prefix):
+                lowered = key.lower()
+                if any(fragment in lowered for fragment in PUBLIC_FORBIDDEN_KEY_FRAGMENTS):
+                    issues.append(f"public-safe bucket contains forbidden key {key}")
+                if re.search(r"(^|/)(sentieon|license|private|commercial)(/|$)", lowered):
+                    issues.append(f"public-safe bucket contains forbidden private/commercial key {key}")
+        return issues
 
     def _log_bucket_cli_list(self, bucket: str) -> None:
         """Run and log a verbose aws s3 ls against ``bucket``."""

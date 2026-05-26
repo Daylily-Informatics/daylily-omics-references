@@ -100,6 +100,11 @@ def _parse_args(argv: Iterable[str]) -> argparse.Namespace:
         action="store_true",
         help="Skip checking GIAB reads",
     )
+    verify.add_argument(
+        "--public-safe",
+        action="store_true",
+        help="Reject private, commercial, LSMC/RCRF, license, or internal runtime assets",
+    )
 
     ensure = sub.add_parser(
         "ensure",
@@ -187,6 +192,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                 include_hg38=include_hg38,
                 include_b37=include_b37,
                 include_giab=include_giab,
+                public_safe=args.public_safe,
             )
         elif args.command == "ensure":
             region = args.region or manager.region
