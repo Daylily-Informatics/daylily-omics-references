@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "daylily-omics-references"
-version = "0.3.3"
+version = "1.0.0"
 description = "Tools for creating and validating Daylily omics analysis reference buckets"
 readme = "README.md"
 authors = [{name = "Daylily Informatics"}]

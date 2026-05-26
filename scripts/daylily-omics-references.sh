@@ -31,21 +31,29 @@ get_source_bucket_for_version() {
 }
 
 CORE_PREFIXES=(
-  "cluster_boot_config/"
-  "data/cached_envs/"
-  "data/tool_specific_resources/"
-  "data/budget_tags/"
+  "runtime_assets/cluster_boot_config/"
+  "runtime_assets/cached_envs/"
+  "runtime_assets/tool_specific_resources/"
+  "runtime_assets/budget_tags/"
+)
+DAYEC_REQUIRED_OBJECT_KEYS=(
+  "runtime_assets/cached_envs/apptainer_1.4.5_amd64.deb"
+  "runtime_assets/tool_specific_resources/cromwell_87.jar"
+  "runtime_assets/tool_specific_resources/womtool_87.jar"
+)
+DAYEC_REQUIRED_PREFIXES=(
+  "runtime_assets/cached_envs/conda/"
 )
 HG38_PREFIXES=(
-  "data/genomic_data/organism_references/H_sapiens/hg38/"
-  "data/genomic_data/organism_annotations/H_sapiens/hg38/"
+  "genomic_data/organism_references/H_sapiens/hg38/"
+  "genomic_data/organism_annotations/H_sapiens/hg38/"
 )
 B37_PREFIXES=(
-  "data/genomic_data/organism_references/H_sapiens/b37/"
-  "data/genomic_data/organism_annotations/H_sapiens/b37/"
+  "genomic_data/organism_references/H_sapiens/b37/"
+  "genomic_data/organism_annotations/H_sapiens/b37/"
 )
 GIAB_PREFIXES=(
-  "data/genomic_data/organism_reads/"
+  "genomic_data/organism_reads_slim/"
 )
 
 log() {
@@ -209,6 +217,11 @@ prefix_exists() {
   [[ $(echo "$output" | jq '.Contents | length') -gt 0 ]]
 }
 
+object_exists() {
+  local bucket="$1" key="$2"
+  aws s3api head-object --bucket "$bucket" --key "$key" >/dev/null 2>&1
+}
+
 clone_bucket() {
   local bucket_prefix="$1" region="$2" version="$3" dry_run="$4" include_hg38="$5" include_b37="$6" include_giab="$7" use_accel="$8" log_file="$9"
 
@@ -280,9 +293,27 @@ verify_bucket() {
       missing+=("$p")
     fi
   done
+  for p in "${DAYEC_REQUIRED_PREFIXES[@]}"; do
+    if ! prefix_exists "$bucket" "$p"; then
+      missing+=("$p")
+    fi
+  done
 
   if [[ ${#missing[@]} -gt 0 ]]; then
     log ERROR "Bucket '$bucket' is missing expected prefixes: ${missing[*]}"
+    return 1
+  fi
+
+  local missing_objects=()
+  local key
+  for key in "${DAYEC_REQUIRED_OBJECT_KEYS[@]}"; do
+    if ! object_exists "$bucket" "$key"; then
+      missing_objects+=("$key")
+    fi
+  done
+
+  if [[ ${#missing_objects[@]} -gt 0 ]]; then
+    log ERROR "Bucket '$bucket' is missing DAY-EC required objects: ${missing_objects[*]}"
     return 1
   fi
 

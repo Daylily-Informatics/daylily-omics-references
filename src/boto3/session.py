@@ -39,6 +39,9 @@ class S3Client:
     def get_object(self, **params: Any) -> Dict[str, Any]:
         return self._dispatch("get_object", params)
 
+    def head_object(self, **params: Any) -> Dict[str, Any]:
+        return self._dispatch("head_object", params)
+
     def list_objects_v2(self, **params: Any) -> Dict[str, Any]:
         return self._dispatch("list_objects_v2", params)
 
@@ -115,6 +118,12 @@ class S3Client:
             raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "GetObject")
         data = bucket[Key]
         return {"Body": StreamingBody(io.BytesIO(data), len(data))}
+
+    def _handle_head_object(self, Bucket: str, Key: str) -> Dict[str, Any]:
+        bucket = self._buckets.get(Bucket)
+        if not bucket or Key not in bucket:
+            raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject")
+        return {}
 
     def _handle_list_objects_v2(
         self, Bucket: str, Prefix: str | None = None, MaxKeys: int = 1
