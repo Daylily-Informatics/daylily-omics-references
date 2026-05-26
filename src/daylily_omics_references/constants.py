@@ -42,7 +42,7 @@ B37_PREFIXES = (
 )
 
 GIAB_PREFIXES = (
-    "genomic_data/organism_reads/",
+    "genomic_data/organism_reads_slim/",
 )
 
 PUBLIC_SAFE_SCAN_PREFIXES = (
